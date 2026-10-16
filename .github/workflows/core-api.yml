@@ -7,15 +7,15 @@ on:
     branches: ["main"]
     paths: ["services/core-api/**", ".github/workflows/core-api.yml"]
 
-jobs: 
+jobs:
   test-and-sonar:
     runs-on: ubuntu-latest
-    steps: 
+    steps:
       # Checkout the Code
       - name: Checkout code
         uses: actions/checkout@v4
-        # # Shallow clones disabled: SonarCloud requires full git history for blame & new-code tracking
-        with: 
+        # Shallow clones disabled: SonarCloud requires full git history for blame & new-code tracking
+        with:
           fetch-depth: 0
 
       # Set up Python
@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
-          cache: 'pip'  
+          cache: "pip"
 
       # Install Dependencies & Testing Tools
       - name: Install Dependencies
@@ -62,7 +62,7 @@ jobs:
       # Checkout the Code
       - name: Checkout code
         uses: actions/checkout@v4
-        with: 
+        with:
           fetch-depth: 0
       # Set up Docker Buildx
       - name: Set up Docker Buildx
@@ -80,19 +80,19 @@ jobs:
         with:
           context: services/core-api
           push: false
-          load: true   
-        # Immutable tagging: Git commit SHA ensures traceable, non-overwritable deployments
+          load: true
+          # Immutable tagging: Git commit SHA ensures traceable, non-overwritable deployments
           tags: ghcr.io/koushikpraneeth/app-platform/core-api:${{ github.sha }}
 
       # Trivy scan the image
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'ghcr.io/koushikpraneeth/app-platform/core-api:${{ github.sha }}'
-          format: 'table'   
+          image-ref: "ghcr.io/koushikpraneeth/app-platform/core-api:${{ github.sha }}"
+          format: "table"
           # Shift-left security: fail pipeline immediately if HIGH or CRITICAL CVEs exist
-          exit-code: '1'
-          severity: 'CRITICAL'
+          exit-code: "1"
+          severity: "CRITICAL"
           ignore-unfixed: true
 
       # Push the image to the GHCR
@@ -100,17 +100,3 @@ jobs:
         # Don't Push Images on Pull Requests!
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: docker push ghcr.io/koushikpraneeth/app-platform/core-api:${{ github.sha }}
-
-
-
-
-
-
-        
-
-      
-        
-
-
-
-
