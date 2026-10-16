@@ -85,6 +85,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
+          trivyignores: services/web-client/.trivyignore
           image-ref: "ghcr.io/koushikpraneeth/app-platform/web-client:${{ github.sha }}"
           format: "table"
           # Shift-left security: fail pipeline immediately if HIGH or CRITICAL CVEs exist

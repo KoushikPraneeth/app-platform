@@ -1,0 +1,4 @@
+# Next.js Windows-only RCE: Container runs on Linux Alpine in AKS
+CVE-2026-75604
+# Next.js Image Optimization API: Not utilized in internal dashboard
+GHSA-2xp9-vwfh-vxw4
