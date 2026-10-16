@@ -47,7 +47,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=KoushikPraneeth_app-platform
-            -Dsonar.organization=KoushikPraneeth
+            -Dsonar.organization=koushikpraneeth
             -Dsonar.sources=services/core-api/app
             -Dsonar.tests=services/core-api/tests
             -Dsonar.python.coverage.reportPaths=services/core-api/coverage.xml
