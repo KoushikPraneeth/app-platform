@@ -51,7 +51,7 @@ const COMMUNITIES = [
   { id: "r/general", name: "r/general", icon: MessageSquareCode, color: "text-slate-400" },
 ];
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = typeof window !== "undefined" ? "" : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000");
 
 function getRelativeTime(isoString: string): string {
   try {
@@ -107,7 +107,7 @@ export default function ThreadOpsPlatform() {
   // Readiness Probe Checker
   const checkHealth = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/readyz`, { cache: "no-store" });
+      const res = await fetch(`${API_BASE}/api/readyz`, { cache: "no-store" });
       const data = await res.json();
       if (res.ok && data.status === "ready") {
         setSystemHealth({

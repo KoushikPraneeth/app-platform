@@ -24,9 +24,10 @@ def test_readyz_diagnostics():
     Verify readiness probe returns structured component status
     for both PostgreSQL and Redis connectivity.
     """
-    response = client.get("/readyz")
-    assert response.status_code in [200, 503]
-    data = response.json()
-    assert "status" in data
-    assert "postgres" in data
-    assert "redis" in data
+    for endpoint in ["/readyz", "/api/readyz"]:
+        response = client.get(endpoint)
+        assert response.status_code in [200, 503]
+        data = response.json()
+        assert "status" in data
+        assert "postgres" in data
+        assert "redis" in data

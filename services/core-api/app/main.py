@@ -128,6 +128,7 @@ async def healthz():
 
 
 @app.get("/readyz", tags=["Health"])
+@app.get("/api/readyz", tags=["Health"])
 async def readyz():
     """
     Readiness probe: validates connectivity to PostgreSQL and Redis.
