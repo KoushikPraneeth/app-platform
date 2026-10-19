@@ -98,27 +98,47 @@ jobs:
       # 3. GITOPS AUTOMATED PROMOTION
       # =====================================================================
       - script: |
-          if [ -z "$GITHUB_PAT" ]; then
-            echo "##vso[task.logissue type=warning]GITHUB_PAT variable is not set. Skipping automated GitOps commit back to gitops-manifests."
-            echo "To enable auto-commit, add GITHUB_PAT as a secret variable in pipeline settings."
+          if [ -z "$TOKEN" ]; then
+            echo "##vso[task.logissue type=warning]GITHUB_PAT is not configured in Azure DevOps Pipeline Variables. Skipping GitOps commit."
             exit 0
           fi
 
           git config --global user.email "azure-pipelines@threadops.internal"
           git config --global user.name "Azure Pipelines Bot"
 
-          TARGET_TAG="$(Build.SourceVersion)"
+          export TARGET_TAG="$(Build.SourceVersion)"
           echo "Promoting gitops-manifests with immutable SHA: $TARGET_TAG"
 
-          git clone https://$(GITHUB_PAT)@github.com/KoushikPraneeth/gitops-manifests.git manifests
+          git clone "https://${TOKEN}@github.com/KoushikPraneeth/gitops-manifests.git" manifests
           cd manifests
 
-          sed -i "s|tag: \".*\"|tag: \"$TARGET_TAG\"|g" chart/values.yaml
+          # Selective Python update for application image tags only (leaves postgres & redis intact)
+          python3 -c "
+          import os
+          tag = os.environ.get('TARGET_TAG')
+          with open('chart/values.yaml', 'r') as f:
+              lines = f.readlines()
+          new_lines = []
+          in_app_service = False
+          for line in lines:
+              if line.startswith('coreApi:') or line.startswith('webClient:') or line.startswith('notifyService:'):
+                  in_app_service = True
+              elif line and not line[0].isspace() and not line.startswith('#'):
+                  in_app_service = False
+
+              if in_app_service and 'tag:' in line:
+                  indent = line[:line.find('tag:')]
+                  new_lines.append(f'{indent}tag: \"{tag}\"\n')
+              else:
+                  new_lines.append(line)
+          with open('chart/values.yaml', 'w') as f:
+              f.writelines(new_lines)
+          "
 
           git diff chart/values.yaml
           git add chart/values.yaml
-          git commit -m "chore(gitops): auto-promote images to $TARGET_TAG [skip ci]" || echo "No changes to commit"
+          git commit -m "chore(gitops): auto-promote application images to $TARGET_TAG [skip ci]" || echo "No changes to commit"
           git push origin main
         displayName: 'GitOps: Auto-promote Image SHA in Helm Values'
         env:
-          GITHUB_PAT: $(GITHUB_PAT)
+          TOKEN: $(GITHUB_PAT)
