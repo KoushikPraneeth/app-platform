@@ -1,6 +1,6 @@
 import pytest
-from fastapi.testclient import TestClient
 from app.main import app
+from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
@@ -16,7 +16,10 @@ def test_metrics_endpoint():
     """Verify Prometheus metrics are properly exposed for scraping."""
     response = client.get("/metrics")
     assert response.status_code == 200
-    assert "http_requests_total" in response.text or "process_cpu_seconds_total" in response.text
+    assert (
+        "http_requests_total" in response.text
+        or "process_cpu_seconds_total" in response.text
+    )
 
 
 def test_readyz_diagnostics():

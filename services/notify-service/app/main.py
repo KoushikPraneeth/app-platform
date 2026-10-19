@@ -1,9 +1,11 @@
 import json
 import sys
-from fastapi import FastAPI, status
-from pydantic import BaseModel, Field
-from prometheus_fastapi_instrumentator import Instrumentator
 
+from fastapi import FastAPI, status
+from prometheus_fastapi_instrumentator import Instrumentator
+from pydantic import BaseModel, Field
+
+# Initialize FastAPI app with metadata for OpenAPI documentation
 app = FastAPI(
     title="Notify Service",
     description="Internal audit microservice logging asynchronous events from the platform",
