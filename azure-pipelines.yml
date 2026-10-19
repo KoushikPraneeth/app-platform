@@ -58,6 +58,15 @@ jobs:
       # =====================================================================
       # 2. DOCKER BUILD & PUSH (IMMUTABLE SHA TAGS)
       # =====================================================================
+      - script: |
+          if [ -f /etc/docker/daemon.json ]; then
+            sudo jq '. + {"mtu": 1400}' /etc/docker/daemon.json > /tmp/daemon.json && sudo mv /tmp/daemon.json /etc/docker/daemon.json
+          else
+            echo '{"mtu": 1400}' | sudo tee /etc/docker/daemon.json
+          fi
+          sudo systemctl restart docker
+        displayName: 'Configure Docker MTU (1400) for Azure Runner'
+
       - task: Docker@2
         displayName: 'Build & Push: core-api'
         inputs:
