@@ -107,8 +107,12 @@ jobs:
       # 3. GITOPS AUTOMATED PROMOTION
       # =====================================================================
       - script: |
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = '$(GITHUB_PAT)' ]; then
-            echo "##vso[task.logissue type=error]GITHUB_PAT is not configured in Azure DevOps Pipeline Variables. GitOps promotion aborted."
+          echo "Diagnostic: Evaluated TOKEN character count = ${#TOKEN}"
+          if [ -z "$TOKEN" ]; then
+            echo "##vso[task.logissue type=error]TOKEN is completely empty! Azure DevOps did not inject any value."
+            exit 1
+          elif [ "$TOKEN" = '$(GITHUB_PAT)' ]; then
+            echo "##vso[task.logissue type=error]TOKEN equals literal '\$(GITHUB_PAT)'! Azure DevOps does not find any variable named GITHUB_PAT."
             exit 1
           fi
 
