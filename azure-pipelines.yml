@@ -1,0 +1,166 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - 'README.md'
+      - '.gitignore'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  acrServiceConnection: 'acr-service-connection'
+  acrRegistry: 'acrdevpk.azurecr.io'
+  shortSha: '$(Build.SourceVersion)'
+
+stages:
+  # =========================================================================
+  # STAGE 1: Code Quality, Unit Tests & Security Gate
+  # =========================================================================
+  - stage: TestAndSecurity
+    displayName: 'Quality & Security Verification'
+    jobs:
+      - job: Test_CoreAPI
+        displayName: 'Test: core-api (Python 3.11)'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+            displayName: 'Set up Python 3.11'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r services/core-api/requirements.txt
+              pip install pytest pytest-cov
+              cd services/core-api && pytest tests/
+            displayName: 'Run Pytest for core-api'
+
+      - job: Test_NotifyService
+        displayName: 'Test: notify-service (Python 3.11)'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+            displayName: 'Set up Python 3.11'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install -r services/notify-service/requirements.txt
+              pip install pytest pytest-cov httpx
+              cd services/notify-service && pytest tests/
+            displayName: 'Run Pytest for notify-service'
+
+      - job: Lint_WebClient
+        displayName: 'Lint: web-client (Next.js 14)'
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '20.x'
+            displayName: 'Set up Node.js 20.x'
+
+          - script: |
+              cd services/web-client
+              npm install
+              npm run lint
+            displayName: 'Run ESLint for web-client'
+
+      - job: Trivy_Security_Scan
+        displayName: 'Security: Trivy Vulnerability Scan'
+        steps:
+          - script: |
+              sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+              wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+              echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+              sudo apt-get update && sudo apt-get install -y trivy
+              trivy fs --severity HIGH,CRITICAL --exit-code 0 services/core-api
+              trivy fs --severity HIGH,CRITICAL --exit-code 0 services/web-client
+            displayName: 'Scan Source & Dependencies with Trivy'
+
+  # =========================================================================
+  # STAGE 2: Multi-Stage Docker Builds & Push to ACR
+  # =========================================================================
+  - stage: BuildAndPush
+    displayName: 'Build & Push Images to ACR'
+    dependsOn: TestAndSecurity
+    condition: succeeded()
+    jobs:
+      - job: BuildPushContainers
+        displayName: 'Docker Build & Push (Immutable SHA Tags)'
+        steps:
+          - script: |
+              SHORT_SHA=$(echo $(Build.SourceVersion) | cut -c1-7)
+              echo "##vso[task.setvariable variable=commitShortSha]$SHORT_SHA"
+              echo "Target Immutable Tag: $SHORT_SHA"
+            displayName: 'Compute Short Commit SHA'
+
+          - task: Docker@2
+            displayName: 'Build & Push core-api'
+            inputs:
+              containerRegistry: $(acrServiceConnection)
+              repository: 'core-api'
+              command: 'buildAndPush'
+              Dockerfile: 'services/core-api/Dockerfile'
+              buildContext: 'services/core-api'
+              tags: |
+                $(Build.SourceVersion)
+                latest
+
+          - task: Docker@2
+            displayName: 'Build & Push web-client'
+            inputs:
+              containerRegistry: $(acrServiceConnection)
+              repository: 'web-client'
+              command: 'buildAndPush'
+              Dockerfile: 'services/web-client/Dockerfile'
+              buildContext: 'services/web-client'
+              tags: |
+                $(Build.SourceVersion)
+                latest
+
+          - task: Docker@2
+            displayName: 'Build & Push notify-service'
+            inputs:
+              containerRegistry: $(acrServiceConnection)
+              repository: 'notify-service'
+              command: 'buildAndPush'
+              Dockerfile: 'services/notify-service/Dockerfile'
+              buildContext: 'services/notify-service'
+              tags: |
+                $(Build.SourceVersion)
+                latest
+
+  # =========================================================================
+  # STAGE 3: GitOps Automated Handoff (Updates gitops-manifests)
+  # =========================================================================
+  - stage: GitOpsSync
+    displayName: 'GitOps Manifest Tag Update'
+    dependsOn: BuildAndPush
+    condition: succeeded()
+    jobs:
+      - job: UpdateManifests
+        displayName: 'Auto-commit New Image SHA to Helm Values'
+        steps:
+          - script: |
+              echo "Configuring Git committer..."
+              git config --global user.email "azure-pipelines@threadops.internal"
+              git config --global user.name "Azure Pipelines Bot"
+
+              TARGET_TAG="$(Build.SourceVersion)"
+              echo "Updating gitops-manifests with immutable SHA: $TARGET_TAG"
+
+              # Clone the GitOps manifests repository using provided GitHub token or Azure token
+              git clone https://$(GITHUB_PAT)@github.com/KoushikPraneeth/gitops-manifests.git manifests
+              cd manifests
+
+              # Update core-api and web-client image tags in values.yaml
+              sed -i "s|tag: \".*\"|tag: \"$TARGET_TAG\"|g" chart/values.yaml
+
+              git diff chart/values.yaml
+              git add chart/values.yaml
+              git commit -m "chore(gitops): auto-promote core-api & web-client to $TARGET_TAG [skip ci]" || echo "No changes to commit"
+              git push origin main
+            displayName: 'Commit SHA Tag to gitops-manifests'
+            env:
+              GITHUB_PAT: $(GITHUB_PAT)
