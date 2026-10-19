@@ -107,8 +107,9 @@ jobs:
       # 3. GITOPS AUTOMATED PROMOTION
       # =====================================================================
       - script: |
-          if [ -z "$TOKEN" ]; then
-            echo "##vso[task.logissue type=warning]GITHUB_PAT is not configured in Azure DevOps Pipeline Variables. Skipping GitOps commit."
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = '$(GITHUB_PAT)' ]; then
+            echo "##vso[task.logissue type=warning]GITHUB_PAT is not configured in Azure DevOps Pipeline Variables. Skipping automated GitOps push to GitHub."
+            echo "Microservice images for core-api, web-client, and notify-service were successfully built, scanned, and pushed to ACR with SHA: $(Build.SourceVersion)"
             exit 0
           fi
 
@@ -118,7 +119,7 @@ jobs:
           export TARGET_TAG="$(Build.SourceVersion)"
           echo "Promoting gitops-manifests with immutable SHA: $TARGET_TAG"
 
-          git clone "https://${TOKEN}@github.com/KoushikPraneeth/gitops-manifests.git" manifests
+          git clone "https://x-access-token:${TOKEN}@github.com/KoushikPraneeth/gitops-manifests.git" manifests
           cd manifests
 
           # Selective Python update for application image tags only (leaves postgres & redis intact)
