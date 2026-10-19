@@ -108,9 +108,8 @@ jobs:
       # =====================================================================
       - script: |
           if [ -z "$TOKEN" ] || [ "$TOKEN" = '$(GITHUB_PAT)' ]; then
-            echo "##vso[task.logissue type=warning]GITHUB_PAT is not configured in Azure DevOps Pipeline Variables. Skipping automated GitOps push to GitHub."
-            echo "Microservice images for core-api, web-client, and notify-service were successfully built, scanned, and pushed to ACR with SHA: $(Build.SourceVersion)"
-            exit 0
+            echo "##vso[task.logissue type=error]GITHUB_PAT is not configured in Azure DevOps Pipeline Variables. GitOps promotion aborted."
+            exit 1
           fi
 
           git config --global user.email "azure-pipelines@threadops.internal"
