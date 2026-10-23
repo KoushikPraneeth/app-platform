@@ -1,6 +1,7 @@
 """A bounded k6 case with raw samples, cluster state and generator statistics."""
 import argparse
 import datetime
+import contextlib
 import gzip
 import hashlib
 import json
@@ -166,10 +167,32 @@ def case(name, rate, seconds=180, mode='read', cache=True, warmup=30, event=None
                                 started_utc=started, finished_utc=now(), exit_code=code, output_file=str((folder / 'console-output.txt').relative_to(OUT)))) + '\n')
     for filename in ['summary.json', 'samples.json.gz']:
         remote = '/results/summary.json' if filename == 'summary.json' else remote_folder + '/' + filename
-        kubectl('-n', NS, 'cp', '--retries=3', 'bench-generator:' + remote, str(folder / filename), explanation='Retrieve raw in-cluster generator result: ' + filename, timeout=180)
+        download_artifact(remote, folder / filename)
     kubectl('-n', NS, 'exec', 'bench-generator', '--', 'rm', '-rf', remote_folder, explanation='Remove only downloaded case files from temporary generator storage')
     if not (folder / 'summary.json').exists(): raise RuntimeError('k6 did not produce a summary: ' + str(folder))
     return summarize(folder, config, code, generator)
+
+
+
+def download_artifact(remote, target):
+    # Copy via the older streaming transport after repeated websocket/tar EOFs.
+    # Verify exact remote/local SHA-256; a transfer retry never reruns workload.
+    env = dict(os.environ, KUBECTL_REMOTE_COMMAND_WEBSOCKETS='false')
+    command = ['kubectl', '--request-timeout=0', '-n', NS, 'exec', 'bench-generator', '--', 'cat', remote]
+    expected = kubectl('-n', NS, 'exec', 'bench-generator', '--', 'sha256sum', remote,
+                       explanation='Fingerprint completed remote benchmark artifact').stdout.split()[0]
+    for attempt in range(1, 4):
+        started = now()
+        with target.open('wb') as stream:
+            p = subprocess.run(command, env=env, stdout=stream, stderr=subprocess.PIPE, timeout=240)
+        actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        row = dict(command_arguments=command, explanation='Retrieve exact completed artifact with streaming transport and SHA-256 verification',
+                   environment_overrides={'KUBECTL_REMOTE_COMMAND_WEBSOCKETS': 'false'}, started_utc=started, finished_utc=now(),
+                   exit_code=p.returncode, stderr=p.stderr.decode(errors='replace'), attempt=attempt,
+                   expected_sha256=expected, actual_sha256=actual, output_file=str(target.relative_to(OUT)), bytes=target.stat().st_size)
+        with (OUT / 'commands-output.jsonl').open('a') as log: log.write(json.dumps(row) + '\n')
+        if p.returncode == 0 and actual == expected: return
+    raise RuntimeError('Artifact failed exact-content verification: ' + str(target))
 
 
 def summarize(folder, config, code, generator):
