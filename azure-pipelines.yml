@@ -50,10 +50,11 @@ jobs:
         displayName: 'ESLint: web-client'
 
       - script: |
+          mkdir -p "$(Build.ArtifactStagingDirectory)/security"
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
           trivy fs --severity HIGH,CRITICAL --exit-code 0 services/core-api
           trivy fs --severity HIGH,CRITICAL --exit-code 0 services/web-client
-        displayName: 'Trivy: Security Scan (High & Critical)'
+        displayName: 'Trivy: Informational Source Scan (High & Critical)'
 
       # =====================================================================
       # 2. DOCKER BUILD & PUSH (IMMUTABLE SHA TAGS)
@@ -68,11 +69,11 @@ jobs:
         displayName: 'Configure Docker MTU (1400) for Azure Runner'
 
       - task: Docker@2
-        displayName: 'Build & Push: core-api'
+        displayName: 'Build: core-api'
         inputs:
           containerRegistry: $(acrServiceConnection)
           repository: 'core-api'
-          command: 'buildAndPush'
+          command: 'build'
           Dockerfile: 'services/core-api/Dockerfile'
           buildContext: 'services/core-api'
           tags: |
@@ -80,11 +81,11 @@ jobs:
             latest
 
       - task: Docker@2
-        displayName: 'Build & Push: web-client'
+        displayName: 'Build: web-client'
         inputs:
           containerRegistry: $(acrServiceConnection)
           repository: 'web-client'
-          command: 'buildAndPush'
+          command: 'build'
           Dockerfile: 'services/web-client/Dockerfile'
           buildContext: 'services/web-client'
           tags: |
@@ -92,13 +93,60 @@ jobs:
             latest
 
       - task: Docker@2
-        displayName: 'Build & Push: notify-service'
+        displayName: 'Build: notify-service'
         inputs:
           containerRegistry: $(acrServiceConnection)
           repository: 'notify-service'
-          command: 'buildAndPush'
+          command: 'build'
           Dockerfile: 'services/notify-service/Dockerfile'
           buildContext: 'services/notify-service'
+          tags: |
+            $(Build.SourceVersion)
+            latest
+
+      # Block publication and GitOps promotion when any runtime image has fixable critical vulnerabilities.
+      - script: |
+          set -euo pipefail
+          for service in core-api web-client notify-service; do
+            trivy image --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 \
+              --format json --output "$(Build.ArtifactStagingDirectory)/security/$service.json" \
+              "$(acrRegistry)/$service:$(Build.SourceVersion)"
+          done
+        displayName: 'Trivy: Enforce Runtime Image Security Gate'
+
+      - task: PublishPipelineArtifact@1
+        condition: always()
+        inputs:
+          targetPath: '$(Build.ArtifactStagingDirectory)/security'
+          artifact: 'runtime-security-reports'
+        displayName: 'Publish Security Evidence'
+
+      - task: Docker@2
+        displayName: 'Push: core-api'
+        inputs:
+          containerRegistry: $(acrServiceConnection)
+          repository: 'core-api'
+          command: 'push'
+          tags: |
+            $(Build.SourceVersion)
+            latest
+
+      - task: Docker@2
+        displayName: 'Push: web-client'
+        inputs:
+          containerRegistry: $(acrServiceConnection)
+          repository: 'web-client'
+          command: 'push'
+          tags: |
+            $(Build.SourceVersion)
+            latest
+
+      - task: Docker@2
+        displayName: 'Push: notify-service'
+        inputs:
+          containerRegistry: $(acrServiceConnection)
+          repository: 'notify-service'
+          command: 'push'
           tags: |
             $(Build.SourceVersion)
             latest

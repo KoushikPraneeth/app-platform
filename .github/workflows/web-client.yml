@@ -85,13 +85,21 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          trivyignores: services/web-client/.trivyignore
           image-ref: "ghcr.io/koushikpraneeth/app-platform/web-client:${{ github.sha }}"
-          format: "table"
-          # Shift-left security: fail pipeline immediately if HIGH or CRITICAL CVEs exist
+          format: "json"
+          output: "trivy-web-client.json"
+          # Fail on fixable CRITICAL findings in the built runtime image
           exit-code: "1"
           severity: "CRITICAL"
           ignore-unfixed: true
+
+      - name: Preserve runtime security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-web-client
+          path: trivy-web-client.json
+          if-no-files-found: warn
 
       # Push the image to the GHCR
       - name: Push the image to the GHCR
