@@ -212,6 +212,11 @@ def list_items(response: Response, db: Session = Depends(get_db)):
         for item in db_items
     ]
 
+    # Return the SQL connection before cache I/O and response serialization.
+    # Otherwise blocked requests can occupy all worker threads while finished
+    # reads still retain connections awaiting dependency teardown.
+    db.close()
+
     # Populate cache
     set_cached_items(serialized_items)
 
@@ -251,6 +256,8 @@ def create_item(item_in: ItemCreate, request: Request, db: Session = Depends(get
     db.add(new_item)
     db.commit()
     db.refresh(new_item)
+    # All response/event fields are loaded; external calls need no SQL connection.
+    db.close()
 
     # Invalidate cache
     invalidate_items_cache()
@@ -296,6 +303,7 @@ def upvote_item(item_id: int, request: Request, db: Session = Depends(get_db)):
     item.upvotes = (item.upvotes or 0) + 1
     db.commit()
     db.refresh(item)
+    db.close()
 
     # Invalidate cache so next read reflects updated counter
     invalidate_items_cache()
