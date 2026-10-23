@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r services/notify-service/requirements.txt
-          pip install pytest pytest-cov httpx
+          pip install pytest pytest-cov -r services/notify-service/requirements-test.txt
 
           # Run Unit Tests & Generate Coverage
       - name: Run Tests

@@ -1,42 +1,36 @@
-FROM node:20-alpine AS deps
+FROM node@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
 
-COPY package.json ./
-RUN npm install
-
-FROM node:20-alpine AS builder
+FROM node@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN mkdir -p public
-
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-
 RUN npm run build
 
-FROM node:20-alpine AS runner
-WORKDIR /app
-
-# Harden container by stripping build tools (npm/npx) not needed for Next.js standalone server
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
-
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
+FROM node@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runtime-files
 RUN addgroup --system --gid 10001 nodejs && \
-    adduser --system --uid 10001 nextjs
-
+    adduser --system --uid 10001 --ingroup nodejs nextjs
+WORKDIR /app
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=10001:10001 /app/.next/standalone ./
+COPY --from=builder --chown=10001:10001 /app/.next/static ./.next/static
 
+FROM scratch AS runner
+COPY --from=runtime-files /lib/ /lib/
+COPY --from=runtime-files /usr/lib/ /usr/lib/
+COPY --from=runtime-files /etc/ /etc/
+COPY --from=runtime-files /tmp/ /tmp/
+COPY --from=runtime-files /usr/local/bin/node /usr/local/bin/node
+COPY --from=runtime-files --chown=10001:10001 /app/ /app/
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 USER nextjs
-
 EXPOSE 3000
-
-CMD ["node", "server.js"]
+CMD ["/usr/local/bin/node", "server.js"]

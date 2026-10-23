@@ -27,7 +27,7 @@ jobs:
 
       # Install Dependencies
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
         working-directory: services/web-client
 
       # Run ESLint

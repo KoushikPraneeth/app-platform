@@ -8,7 +8,7 @@ trigger:
       - '.gitignore'
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: 'ubuntu-24.04'
 
 variables:
   acrServiceConnection: 'acr-service-connection'
@@ -34,7 +34,7 @@ jobs:
         displayName: 'Pytest: core-api'
 
       - script: |
-          pip install -r services/notify-service/requirements.txt pytest pytest-cov httpx
+          pip install -r services/notify-service/requirements.txt -r services/notify-service/requirements-test.txt pytest pytest-cov
           cd services/notify-service && pytest tests/
         displayName: 'Pytest: notify-service'
 
@@ -45,7 +45,7 @@ jobs:
 
       - script: |
           cd services/web-client
-          npm install
+          npm ci
           npm run lint
         displayName: 'ESLint: web-client'
 
