@@ -3,6 +3,8 @@ import argparse
 import datetime
 import json
 import pathlib
+import subprocess
+import sys
 import urllib.parse
 
 from audit import OUT, ROOT, kubectl, now, run, save
@@ -29,8 +31,13 @@ def provision():
              'cleanup_start_deadline_utc': (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=9900)).isoformat(),
              'status': 'provisioning'}
     save('capacity-session.json', state)
+    guard_log = (OUT / 'capacity-guardian.log').open('a')
+    guardian = subprocess.Popen([sys.executable, str(pathlib.Path(__file__).with_name('guardian.py'))], stdout=guard_log, stderr=subprocess.STDOUT, start_new_session=True)
+    guard_log.close()
+    state['guardian_pid'] = guardian.pid; save('capacity-session.json', state)
     args = ['az', 'aks', 'nodepool', 'add', *ORG, '--name', POOL, '--mode', 'User', '--node-count', '1',
             '--node-vm-size', 'Standard_DS2_v2', '--max-pods', '30', '--node-osdisk-size', '128',
+            '--vnet-subnet-id', pools[0]['vnetSubnetId'],
             '--node-taints', 'benchmark=threadops:NoSchedule', '--labels', 'benchmark=threadops', '-o', 'json']
     run(args, 'Provision the explicitly approved, tainted temporary benchmark node', timeout=1200)
     state.update(status='ready', ready_utc=now()); save('capacity-session.json', state)
@@ -100,16 +107,22 @@ def cleanup():
     state = json.loads((OUT / 'capacity-session.json').read_text()) if (OUT / 'capacity-session.json').exists() else {}
     kubectl('delete', 'namespace', NS, '--ignore-not-found=true', '--wait=true', '--timeout=120s',
             explanation='Remove only temporary benchmark namespace and workloads', required=False, timeout=180)
-    psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='" + DB + "' AND pid<>pg_backend_pid();\nDROP DATABASE IF EXISTS " + DB + ';', database='postgres')
-    kubectl('exec', '-i', '-n', 'default', 'deploy/core-api', '--', '/usr/local/bin/python', '-',
-            explanation='Remove only the benchmark Redis key prefix', stdin="import redis,os\nr=redis.from_url(os.environ['REDIS_URL'])\nkeys=list(r.scan_iter(match='bench:20261023:*'))\nprint('benchmark_keys_removed',r.delete(*keys) if keys else 0)\n", required=False)
+    errors = []
+    try:
+        psql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='" + DB + "' AND pid<>pg_backend_pid();\nDROP DATABASE IF EXISTS " + DB + ';', database='postgres')
+        kubectl('exec', '-i', '-n', 'default', 'deploy/core-api', '--', '/usr/local/bin/python', '-',
+                explanation='Remove only the benchmark Redis key prefix', stdin="import redis,os\nr=redis.from_url(os.environ['REDIS_URL'])\nkeys=list(r.scan_iter(match='bench:20261023:*'))\nprint('benchmark_keys_removed',r.delete(*keys) if keys else 0)\n", required=False)
+    except Exception as error:
+        errors.append(str(error))
     if state:
-        run(['az', 'aks', 'nodepool', 'delete', *ORG, '--name', POOL, '--yes', '-o', 'json'],
-            'Delete the approved temporary benchmark node pool', timeout=1200)
+        current = json.loads(run(['az', 'aks', 'nodepool', 'list', *ORG, '-o', 'json'], 'Check whether temporary capacity still exists before deletion').stdout)
+        if any(p['name'] == POOL for p in current):
+            run(['az', 'aks', 'nodepool', 'delete', *ORG, '--name', POOL, '--yes', '-o', 'json'],
+                'Delete the approved temporary benchmark node pool', timeout=1200)
         remaining = json.loads(run(['az', 'aks', 'nodepool', 'list', *ORG, '-o', 'json'], 'Verify temporary pool removal and original pool count').stdout)
         assert all(p['name'] != POOL for p in remaining)
         assert next(p for p in remaining if p['name'] == 'systempool')['count'] == 1
-        state.update(status='removed', removed_utc=now(), remaining_pools=[{'name': p['name'], 'count': p['count']} for p in remaining]); save('capacity-session.json', state)
+        state.update(status='removed', removed_utc=now(), cleanup_errors=errors, remaining_pools=[{'name': p['name'], 'count': p['count']} for p in remaining]); save('capacity-session.json', state)
 
 
 if __name__ == '__main__':

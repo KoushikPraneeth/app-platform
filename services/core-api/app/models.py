@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Index
 from app.database import Base
 
 
@@ -24,3 +24,5 @@ class Item(Base):
     # Backward compatibility with initial schema
     title = Column(String(255), nullable=True)
     author = Column(String(100), nullable=True)
+
+    __table_args__ = (Index("ix_items_created_at_desc", created_at.desc()),)

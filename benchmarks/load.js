@@ -33,10 +33,10 @@ export const options = {
 
 export default function () {
   const write = __ENV.MODE === 'mixed' && exec.scenario.iterationInTest % 10 === 9;
-  const params = { timeout: '5s', redirects: 0, tags: { name: write ? 'create-item' : 'list-items' } };
+  const params = { headers: { Host: __ENV.HOST || 'benchmark.threadops.invalid' }, timeout: '5s', redirects: 0, tags: { name: write ? 'create-item' : 'list-items' } };
   let response;
   if (write) {
-    params.headers = { 'Content-Type': 'application/json' };
+    params.headers['Content-Type'] = 'application/json';
     response = http.post(`${base}/api/items`, JSON.stringify({
       username: '@benchmark', community: 'r/general',
       content: `Benchmark ${__ENV.RUN_ID} ${exec.scenario.name} ${exec.scenario.iterationInTest} ` + 'x'.repeat(448),

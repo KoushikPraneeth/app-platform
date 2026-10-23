@@ -81,11 +81,17 @@ async def lifespan(app: FastAPI):
                     """
                 )
             )
+            # create_all does not add an index to an already-existing table.
+            # Serialize this small schema upgrade across API startup processes.
+            conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('threadops:feed-order-index'))"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_items_created_at_desc ON items (created_at DESC)"))
             conn.commit()
         logger.info("Database tables and community schema synchronized successfully.")
     except Exception as exc:
         logger.error("Failed to initialize database tables on startup: %s", exc)
-    yield
+    with httpx.Client(timeout=2.0) as notify_client:
+        app.state.notify_client = notify_client
+        yield
 
 
 app = FastAPI(
@@ -130,7 +136,7 @@ async def healthz():
 
 @app.get("/readyz", tags=["Health"])
 @app.get("/api/readyz", tags=["Health"])
-async def readyz():
+def readyz():
     """
     Readiness probe: validates connectivity to PostgreSQL and Redis.
     Returns HTTP 200 if both are reachable, otherwise HTTP 503 with diagnostic details.
@@ -178,7 +184,7 @@ async def readyz():
     dependencies=[Depends(rate_limiter)],
     tags=["Community Posts"],
 )
-async def list_items(response: Response, db: Session = Depends(get_db)):
+def list_items(response: Response, db: Session = Depends(get_db)):
     """
     Retrieve latest 25 community posts using Cache-Aside pattern:
     1. Check Redis key 'items:latest'
@@ -220,12 +226,12 @@ async def list_items(response: Response, db: Session = Depends(get_db)):
     dependencies=[Depends(rate_limiter)],
     tags=["Community Posts"],
 )
-async def create_item(item_in: ItemCreate, db: Session = Depends(get_db)):
+def create_item(item_in: ItemCreate, request: Request, db: Session = Depends(get_db)):
     """
     Publish a new community post:
     1. Persist to PostgreSQL (populating legacy columns for backward compatibility)
     2. Invalidate Redis cache key 'items:latest'
-    3. Asynchronously emit audit event to notify-service (fail-safe)
+    3. Emit a best-effort audit event to notify-service
     Rate-limited to 30 requests/minute per client IP.
     """
     handle = item_in.username.strip()
@@ -249,7 +255,7 @@ async def create_item(item_in: ItemCreate, db: Session = Depends(get_db)):
     # Invalidate cache
     invalidate_items_cache()
 
-    # Emit asynchronous event to notify-service (fail-safe)
+    # Emit best-effort event using the shared notification connection pool
     event_payload = {
         "event_type": "POST_CREATED",
         "item_id": new_item.id,
@@ -259,9 +265,8 @@ async def create_item(item_in: ItemCreate, db: Session = Depends(get_db)):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            endpoint = f"{NOTIFY_SERVICE_URL.rstrip('/')}/events"
-            await client.post(endpoint, json=event_payload)
+        endpoint = f"{NOTIFY_SERVICE_URL.rstrip('/')}/events"
+        request.app.state.notify_client.post(endpoint, json=event_payload)
     except Exception as exc:
         print(f"Failed to deliver event to notify-service: {exc}", flush=True)
 
@@ -274,12 +279,12 @@ async def create_item(item_in: ItemCreate, db: Session = Depends(get_db)):
     dependencies=[Depends(rate_limiter)],
     tags=["Community Posts"],
 )
-async def upvote_item(item_id: int, db: Session = Depends(get_db)):
+def upvote_item(item_id: int, request: Request, db: Session = Depends(get_db)):
     """
     Upvote a community post:
     1. Increment upvote counter in PostgreSQL
     2. Invalidate Redis cache key 'items:latest'
-    3. Asynchronously emit upvote audit event to notify-service
+    3. Emit a best-effort upvote audit event to notify-service
     """
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
@@ -305,9 +310,8 @@ async def upvote_item(item_id: int, db: Session = Depends(get_db)):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            endpoint = f"{NOTIFY_SERVICE_URL.rstrip('/')}/events"
-            await client.post(endpoint, json=event_payload)
+        endpoint = f"{NOTIFY_SERVICE_URL.rstrip('/')}/events"
+        request.app.state.notify_client.post(endpoint, json=event_payload)
     except Exception as exc:
         print(f"Failed to deliver upvote event to notify-service: {exc}", flush=True)
 
