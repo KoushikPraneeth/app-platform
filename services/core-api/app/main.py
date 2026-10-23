@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.cache import (
+    CACHE_ENABLED,
     get_cached_items,
     invalidate_items_cache,
     rate_limiter,
@@ -208,7 +209,7 @@ async def list_items(response: Response, db: Session = Depends(get_db)):
     # Populate cache
     set_cached_items(serialized_items)
 
-    response.headers["X-Cache"] = "MISS"
+    response.headers["X-Cache"] = "MISS" if CACHE_ENABLED else "BYPASS"
     return {"source": "database", "items": serialized_items}
 
 

@@ -18,9 +18,25 @@ redis_client = redis.from_url(
     socket_timeout=2.0,
 )
 
-CACHE_KEY_ITEMS = "items:latest"
+def positive_int_setting(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def boolean_setting(name: str, default: bool) -> bool:
+    value = os.getenv(name, str(default)).lower()
+    if value not in {"true", "false"}:
+        raise ValueError(f"{name} must be true or false")
+    return value == "true"
+
+
+REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "")
+CACHE_ENABLED = boolean_setting("CACHE_ENABLED", True)
+CACHE_KEY_ITEMS = f"{REDIS_KEY_PREFIX}items:latest"
 CACHE_TTL_SECONDS = 60
-RATE_LIMIT_MAX_REQUESTS = 30
+RATE_LIMIT_MAX_REQUESTS = positive_int_setting("RATE_LIMIT_MAX_REQUESTS", 30)
 RATE_LIMIT_WINDOW_SECONDS = 60
 
 
@@ -42,7 +58,7 @@ def rate_limiter(request: Request) -> None:
     If Redis is unreachable, logs a warning and fails open.
     """
     client_ip = get_client_ip(request)
-    rate_key = f"ratelimit:{client_ip}"
+    rate_key = f"{REDIS_KEY_PREFIX}ratelimit:{client_ip}"
 
     try:
         pipe = redis_client.pipeline()
@@ -71,6 +87,8 @@ def rate_limiter(request: Request) -> None:
 
 def get_cached_items() -> Optional[List[dict]]:
     """Retrieve cached latest items from Redis, or return None on cache miss or error."""
+    if not CACHE_ENABLED:
+        return None
     try:
         data = redis_client.get(CACHE_KEY_ITEMS)
         if data:
@@ -82,6 +100,8 @@ def get_cached_items() -> Optional[List[dict]]:
 
 def set_cached_items(items: List[dict]) -> bool:
     """Store serialized items in Redis with 60-second TTL."""
+    if not CACHE_ENABLED:
+        return False
     try:
         serialized = json.dumps(items)
         redis_client.setex(CACHE_KEY_ITEMS, CACHE_TTL_SECONDS, serialized)
